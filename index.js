@@ -29,12 +29,14 @@ mongoose
 
         const session = require('express-session');
         const cookieParser = require('cookie-parser');
-        app.use(cookieParser());
+        app.set('trust proxy', 1);
+        app.use(cookieParser(COOKIE_SECRET));
         app.use(
             session({
                 secret: COOKIE_SECRET,
+                proxy: true,
                 saveUninitialized: true,
-                cookie: { maxAge: 1000 * 60 * 60 * 24 }, // ONE DAY
+                cookie: { maxAge: 1000 * 60 * 60 * 24, sameSite: "None", secure: true }, // Max age one day, https for production, http for development
                 resave: false,
             })
         );
@@ -43,7 +45,22 @@ mongoose
         const { OAuth2Client } = require('google-auth-library');
         const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-        app.use(async (req, res, next) => {
+        const auth = async (req, res, next) => {
+          console.log("userid", req.session.user_id)
+          try {
+            if (req.session.user_id) {
+              next();
+            }
+            else {
+              throw "Invalid User ID"
+            }
+          }
+          catch {
+            res.json(null);
+          }
+        }
+      
+        const setUser = (async (req, res, next) => {
             const user = await UserDB.findById(req.session.user_id) 
             req.user = user;
             next();
@@ -52,7 +69,7 @@ mongoose
         app.post('/api/v1/auth/google', async (req, res) => {
             const { token } = req.body;
 
-            if(!token) return;
+            if(!token) return res.json({ error: "Token not found!"});
 
             const ticket = await client.verifyIdToken({
                 idToken: token,
@@ -77,10 +94,11 @@ mongoose
                 res.status(200)
                 res.json(foundUser);
             }
+            console.log("created cookie", req.session)
         });
 
         
-        app.get('/logout',(req,res) => {
+        app.get('/logout', auth, (req,res) => {
             req.session.destroy();
             req.user = null
             console.log(req.session)
@@ -89,14 +107,12 @@ mongoose
             res.send("Successfully logged out from account")
         });
         
-        app.get('/me', async (req, res) => {
+        app.get('/me', auth, setUser, async (req, res) => {
             res.json(req.user);            
         });
-
-
         // GOOGLE AUTH
 
-        // POMODORO START
+        // POMODORO CREATE ROOMS
         const PomodoroRooms = require('./classes/Pomodoro/Rooms');
         const PomodoroRoom = require('./classes/Pomodoro/Room');
         const PomodoroUser = require('./classes/Pomodoro/User');
@@ -109,99 +125,122 @@ mongoose
         // POMODORO END
 
         // VIDEO CHAT START
-        const WaitingCalls = require('./classes/Lesson/WaitingCalls');
-        const WaitingCall = require('./classes/Lesson/WaitingCall');
-        const User = require('./classes/Lesson/User');
+        const Calls = require('./classes/Lesson/Calls');
+        const Call = require('./classes/Lesson/Call');
 
-        const MyWaitingCalls = new WaitingCalls();
+        const MyCalls = new Calls();
+
+        app.get("/api/getCalls", auth, setUser, (req, res) => {
+          res.json(MyCalls.calls)
+        })
         // VIDEO CHAT END
-
-        app.get('/api/getWaitingCalls', (req, res) => {
-            res.json(MyWaitingCalls);
-        });
-
-        app.get('/api/getPomodoroRooms', (req, res) => {
-            res.json(MyPomodoroRooms.rooms);
-        });
-
-        app.get('/api/getPomodoroRoom/:room', (req, res) => {
-            res.json(MyPomodoroRooms.GetRoomFromId(req.params.room));
-        });
-
+  
         io.on('connection', (socket) => {
-            // POMODORO -----------------------------------------------------------------------------------------------------
-            socket.on('join pomodoro room', (roomId, userData) => {
-                const room = MyPomodoroRooms.GetRoomFromId(roomId);
-                console.log('join pomodoro room', room);
-                if (room) {
-                    const length = room.users.length;
-                    if (length === 12) {
-                        socket.emit('room full');
-                        return;
-                    }
-                    room.AddUser(new User(socket.id, userData.email, userData.name, userData.pp, null));
-                    const usersInThisRoom = room.users.filter((user) => user.id !== socket.id); // get users except me
-
-                    socket.emit('all users', usersInThisRoom);
-                    console.log('all users', usersInThisRoom);
-                }
-            });
-
-            socket.on('sending signal', (data) => {
-                io.to(data.to).emit('user joined', { signal: data.signal, caller: data.caller });
-            });
-
-            socket.on('returning signal', (data) => {
-                io.to(data.to).emit('receiving returned signal', { signal: data.signal, id: socket.id });
-            });
-
-            socket.on('disconnect', () => {
-                const room = MyPomodoroRooms.GetRoomFromUserId(socket.id);
-                if (room) {
-                    room.RemoveUser(socket.id);
-                    room.users.map((user) => {
-                        io.to(user.id).emit('user disconnected', socket.id);
-                    });
-                }
-            });
-            // POMODORO -----------------------------------------------------------------------------------------------------
 
             // VIDEO CHAT ---------------------------------------------------------------------------------------------------
-            socket.emit('me', socket.id);
+            socket.on("offerDescription", data => {
+              console.log("Offer-Desc", data)
+              
+              const newCall = new Call(socket.id, "Matematik")
+              newCall.AddUser({ id: socket.id, session: data.userData })
+              newCall.offerDesc = data.offer
+              MyCalls.calls.push(newCall)
 
-            socket.on('disconnect', () => {
-                console.log('A user disconnected.');
-                const call = MyWaitingCalls.GetCallFromUserId(socket.id);
-                if (call) {
-                    call.RemoveUser(socket.id);
-                    if (call.users.length > 0) {
-                        io.to(call.users[0].id).emit('userLeft');
-                    }
-                    MyWaitingCalls.RemoveEmptyCalls();
-                }
+            })
+          
+            socket.on("offerCandidates", data => {
+              
+              const call = MyCalls.GetCallFromUserId(socket.id)
+              call.offerCandidates.push(data.candidates)
+
+              if (call.users.length == 2) {
+                let user = call.users.filter(func).filter(function(u) {
+                  return u.id != socket.id
+                });
+
+                io.to(user[0].id).emit("offerCandidates", data.candidates)
+              }
+            })
+
+            socket.on("validateRoom", (roomId) => {
+              const call = MyCalls.calls.find(call => call.id == roomId)
+              if (call) {
+                socket.emit("validateRoom", true, roomId)
+              }
+              else {
+                socket.emit("validateRoom", false)
+              }
+            })
+          
+            socket.on("getOfferDesc", (callId) => {
+              console.log("Get-Offer-Desc", callId)
+              
+              const call = MyCalls.calls.find(call => call.id == callId)
+              if (!call) {
+                socket.emit("roomNotFound");
+                return
+              }
+              const offerDesc = call.offerDesc
+              socket.emit("getOfferDesc", (offerDesc))
+            })
+          
+            socket.on("getRemoteUserSession", () => {
+              console.log("Get-Remote-Session")
+              
+              const call = MyCalls.GetCallFromUserId(socket.id)
+              let user = call.users.filter(function(u) {
+                  return u.id != socket.id
+              });
+
+              console.log("Call: ", call)
+              console.log("User: ", user)
+              
+              socket.emit("getRemoteUserSession", (user[0].session))
+            })
+          
+            socket.on("answerDescription", (data) => {
+              console.log("Answer-Description", data)
+              
+              const call = MyCalls.calls.find(call => call.id == data.callId)
+              call.answerDesc = data.answerDesc
+              call.AddUser({ id: socket.id, session: data.userData })
+
+              let user = call.users.filter(function(u) {
+                return u.id != socket.id
+              });
+              
+              io.to(user[0].id).emit('remoteDescription', call.answerDesc)
+              socket.emit("getOfferCandidates", call.offerCandidates)
             });
-            socket.on('callUser', ({ userToCall, callFrom, signal }) => {
-                io.to(userToCall).emit('callUser', { signal, callFrom });
-            });
+          
+            socket.on("answerCandidates", data => {
+              
+              const call = MyCalls.GetCallFromUserId(socket.id)
+              call.answerCandidates.push(data.candidates)
+              
+              let user = call.users.filter(function(u) {
+                return u.id != socket.id
+              });
 
-            socket.on('answerCall', ({ signal, to, from, }) => {
-                io.to(to.id).emit('callAccepted', { signal, from });
+              console.log(socket.id)
+              console.log(user[0].id)
+              io.to(user.id).emit("answerCandidates", data.candidates)
+            })
 
-                const user = new User(to.id, to.email, to.name, to.pp, false);
-                const waitingCall = MyWaitingCalls.GetCallFromUserId(from.id);
-                waitingCall.AddUser(user);
-            });
 
-            socket.on('waitingCall', ({ initiator, lesson }) => {
-                console.log(initiator);
-                const newInitiator = new User(initiator.id, initiator.email, initiator.name, initiator.pp, true);
-                const waitingcall = new WaitingCall(newInitiator, lesson);
-
-                waitingcall.AddUser(newInitiator);
-                MyWaitingCalls.waitingCalls.push(waitingcall);
-
-                console.log('new waiting call ', waitingcall);
-            });
+          
+            socket.on("disconnect", () => {
+              const call = MyCalls.GetCallFromUserId(socket.id)
+              if (call) {
+                let user = call.users.filter(function(u) {
+                  return u.id != socket.id
+                });
+  
+                io.to(user[0].id).emit("remoteDisconnected")
+  
+                MyCalls.RemoveCall(call.id)
+              }
+            });       
             // VIDEO CHAT ---------------------------------------------------------------------------------------------------
         });
 
