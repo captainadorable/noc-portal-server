@@ -125,3 +125,9 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# FOR PRODUCTION HTTPS SUPPORT
+cert.pem
+chain.pem
+fullchain.pem
+privkey.pem

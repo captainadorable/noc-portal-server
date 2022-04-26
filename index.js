@@ -4,12 +4,17 @@ require('dotenv').config()
 const MONGO_DB_CONNECTION = process.env.MONGODB_CONNECT;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const COOKIE_SECRET = process.env.COOKIE_SECRET;
+const PRODUCTION = process.env.PRODUCTION;
 const UserDB = require('./models/User');
+
+if (PRODUCTION == "true") console.log("PRODUCTION")
+
 mongoose
     .connect(MONGO_DB_CONNECTION, {})
     .then(() => {
         const app = express();
         const server = require('http').Server(app);
+	
         const io = require('socket.io')(server, {
             cors: {
                 origin: '*',
@@ -248,6 +253,26 @@ mongoose
         server.listen(PORT, () => {
             console.log(`Listening port: ${PORT}`);
         });
+	
+	if (PRODUCTION == "true") {
+		const fs = require('fs');
+		const privateKey = fs.readFileSync('./privkey.pem', 'utf8');
+		const certificate = fs.readFileSync('./cert.pem', 'utf8');
+		const ca = fs.readFileSync('./chain.pem', 'utf8');
+
+		const credentials = {
+			key: privateKey,
+			cert: certificate,
+			ca: ca
+		};
+
+		const https = require('https');
+		const httpsServer = https.createServer(credentials, app);		
+
+		httpsServer.listen(443, () => {
+			console.log('HTTPS Server running on port 443');
+		});
+	}
     })
     .catch((err) => {
         console.log('Database connection error!', err);
