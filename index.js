@@ -51,7 +51,7 @@ mongoose
         const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
         const auth = async (req, res, next) => {
-          console.log("userid", req.session.user_id)
+          console.log("[Auth]: ", req.session.user_id)
           try {
             if (req.session.user_id) {
               next();
@@ -106,8 +106,8 @@ mongoose
         app.get('/logout', auth, (req,res) => {
             req.session.destroy();
             req.user = null
-            console.log(req.session)
-            console.log(req.user)
+            //console.log(req.session)
+            //console.log(req.user)
             res.status(200)
             res.send("Successfully logged out from account")
         });
@@ -135,8 +135,11 @@ mongoose
 
         const MyCalls = new Calls();
 
-        app.get("/api/getCalls", auth, setUser, (req, res) => {
-          res.json(MyCalls.calls)
+        app.get("/api/getCalls", (req, res) => {
+          const calls = MyCalls.calls.filter(function(call) {
+            return call.users.length < 2
+          })
+          res.json(calls)
         })
         // VIDEO CHAT END
   
@@ -144,13 +147,35 @@ mongoose
 
             // VIDEO CHAT ---------------------------------------------------------------------------------------------------
             socket.on("offerDescription", data => {
-              console.log("Offer-Desc", data)
+              //console.log("Offer-Desc", data)
               
-              const newCall = new Call(socket.id, "Matematik")
+              const newCall = new Call(socket.id, data.lesson)
               newCall.AddUser({ id: socket.id, session: data.userData })
               newCall.offerDesc = data.offer
               MyCalls.calls.push(newCall)
 
+              socket.on("changeStatus", (status) => {
+                newCall.teacherStatus = status
+              })
+              
+              socket.on("answerReq", (req, state) => {
+                const foundReq = newCall.waitingStudents.find(std => std.id == req.id);
+
+                if (!foundReq) return
+
+                if (state) {
+                  newCall.waitingStudents = []
+                }
+                else {
+                  newCall.waitingStudents = newCall.waitingStudents.filter(function(student) {
+                    return student.id != req.id
+                  })
+                  
+                }
+                
+                io.to(foundReq.id).emit("reqAnswered", state);
+                io.to(newCall.id).emit("joinRequests", newCall.waitingStudents) // call.id = to teacher  
+              }); 
             })
           
             socket.on("offerCandidates", data => {
@@ -169,16 +194,30 @@ mongoose
 
             socket.on("validateRoom", (roomId) => {
               const call = MyCalls.calls.find(call => call.id == roomId)
+              
               if (call) {
-                socket.emit("validateRoom", true, roomId)
+                socket.emit("validateRoom", call.users.length < 2 ? true : "full", roomId)
               }
               else {
                 socket.emit("validateRoom", false)
               }
             })
+
+            socket.on("sendReqToJoin", (data) => { // callId, session
+              const call = MyCalls.calls.find(call => call.id == data.callId)
+              
+              if (!call) {
+                socket.emit("roomNotFound");
+                return
+              }
+
+              call.waitingStudents.push({ id: socket.id, userData: data.session})
+
+              io.to(call.id).emit("joinRequests", call.waitingStudents) // call.id = to teacher
+            })
           
             socket.on("getOfferDesc", (callId) => {
-              console.log("Get-Offer-Desc", callId)
+              //console.log("Get-Offer-Desc", callId)
               
               const call = MyCalls.calls.find(call => call.id == callId)
               if (!call) {
@@ -186,25 +225,26 @@ mongoose
                 return
               }
               const offerDesc = call.offerDesc
-              socket.emit("getOfferDesc", (offerDesc))
+              //console.log(call)
+              socket.emit("getOfferDesc", offerDesc, call.lesson)
             })
           
             socket.on("getRemoteUserSession", () => {
-              console.log("Get-Remote-Session")
+              //console.log("Get-Remote-Session")
               
               const call = MyCalls.GetCallFromUserId(socket.id)
               let user = call.users.filter(function(u) {
                   return u.id != socket.id
               });
 
-              console.log("Call: ", call)
-              console.log("User: ", user)
+              //console.log("Call: ", call)
+              //console.log("User: ", user)
               
               socket.emit("getRemoteUserSession", (user[0].session))
             })
           
             socket.on("answerDescription", (data) => {
-              console.log("Answer-Description", data)
+              //console.log("Answer-Description", data)
               
               const call = MyCalls.calls.find(call => call.id == data.callId)
               call.answerDesc = data.answerDesc
@@ -216,6 +256,9 @@ mongoose
               
               io.to(user[0].id).emit('remoteDescription', call.answerDesc)
               socket.emit("getOfferCandidates", call.offerCandidates)
+
+              call.connectedDate = Date.now()
+              call.StartTimeCounter(io)
             });
           
             socket.on("answerCandidates", data => {
@@ -227,9 +270,7 @@ mongoose
                 return u.id != socket.id
               });
 
-              console.log(socket.id)
-              console.log(user[0].id)
-              io.to(user.id).emit("answerCandidates", data.candidates)
+              io.to(user[0].id).emit("answerCandidates", data.candidates)
             })
 
 
@@ -240,10 +281,13 @@ mongoose
                 let user = call.users.filter(function(u) {
                   return u.id != socket.id
                 });
+
+                MyCalls.RemoveCall(call.id)
+                
+                if (!user[0]) return
   
                 io.to(user[0].id).emit("remoteDisconnected")
   
-                MyCalls.RemoveCall(call.id)
               }
             });       
             // VIDEO CHAT ---------------------------------------------------------------------------------------------------
