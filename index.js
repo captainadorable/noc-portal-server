@@ -117,18 +117,6 @@ mongoose
         });
         // GOOGLE AUTH
 
-        // POMODORO CREATE ROOMS
-        const PomodoroRooms = require('./classes/Pomodoro/Rooms');
-        const PomodoroRoom = require('./classes/Pomodoro/Room');
-        const PomodoroUser = require('./classes/Pomodoro/User');
-
-        const MyPomodoroRooms = new PomodoroRooms();
-        for (let i = 1; i <= 10; i++) {
-            let room = new PomodoroRoom(`pomodoro-${i}`, `Pomodoro ${i}`);
-            MyPomodoroRooms.CreateRoom(room);
-        }
-        // POMODORO END
-
         // VIDEO CHAT START
         const Calls = require('./classes/Lesson/Calls');
         const Call = require('./classes/Lesson/Call');
