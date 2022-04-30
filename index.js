@@ -14,13 +14,44 @@ mongoose
     .then(() => {
         const app = express();
         const server = require('http').Server(app);
-	
-        const io = require('socket.io')(server, {
-            cors: {
-                origin: '*',
-                methods: ['GET', 'POST'],
-            },
-        });
+
+	let io;
+
+	if (PRODUCTION == "true") {
+		const fs = require('fs');
+		const privateKey = fs.readFileSync('./privkey.pem', 'utf8');
+		const certificate = fs.readFileSync('./cert.pem', 'utf8');
+		const ca = fs.readFileSync('./chain.pem', 'utf8');
+
+		const credentials = {
+			key: privateKey,
+			cert: certificate,
+			ca: ca
+		};
+
+		const https = require('https');
+		const httpsServer = https.createServer(credentials, app);		
+
+		io = require('socket.io')(httpsServer, {
+	            cors: {
+        	        origin: '*',
+                	methods: ['GET', 'POST'],
+        	    },
+	        });
+
+		httpsServer.listen(443, () => {
+			console.log('HTTPS Server running on port 443');
+		});
+	}
+	else {
+		io = require('socket.io')(server, {
+	            cors: {
+        	        origin: '*',
+                	methods: ['GET', 'POST'],
+        	    },
+	        });
+	}
+        
         const cors = require('cors');
 
         const corsConfig = {
@@ -298,25 +329,7 @@ mongoose
             console.log(`Listening port: ${PORT}`);
         });
 	
-	if (PRODUCTION == "true") {
-		const fs = require('fs');
-		const privateKey = fs.readFileSync('./privkey.pem', 'utf8');
-		const certificate = fs.readFileSync('./cert.pem', 'utf8');
-		const ca = fs.readFileSync('./chain.pem', 'utf8');
-
-		const credentials = {
-			key: privateKey,
-			cert: certificate,
-			ca: ca
-		};
-
-		const https = require('https');
-		const httpsServer = https.createServer(credentials, app);		
-
-		httpsServer.listen(443, () => {
-			console.log('HTTPS Server running on port 443');
-		});
-	}
+	
     })
     .catch((err) => {
         console.log('Database connection error!', err);
