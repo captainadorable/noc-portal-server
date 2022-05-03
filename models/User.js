@@ -6,8 +6,8 @@ const schema = new mongoose.Schema({
     permission: String,
     username: { type: String, required: true, default: "nousername"},
     profileBio: { type: String, required: true, default: ""},
-    totalLessons: { type: Number, required: true, default: "0"},
-    totalLessonTime: { type: Number, required: true, default: "0"},
+    totalLessons: { type: Number, required: true, default: 0},
+    totalLessonTime: { type: Number, required: true, default: 0},
     profilePicture: String
 })
 
