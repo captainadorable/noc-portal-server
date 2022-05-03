@@ -6,7 +6,9 @@ module.exports = (io, socket, MyCalls) => {
         socket.emit("roomNotFound");
         return
       }
-  
+
+      if (call.waitingStudents.find(student => student.userData.email === data.session.email)) return
+    
       call.waitingStudents.push({ id: socket.id, userData: data.session })
   
       io.to(call.id).emit("joinRequests", call.waitingStudents) // call.id = to teacher

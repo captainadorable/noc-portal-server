@@ -144,6 +144,26 @@ mongoose
     app.get('/me', auth, setUser, async (req, res) => {
       res.json(req.user);
     });
+
+    app.post('/updateMyProfile', auth, setUser, async (req, res) => {
+      const body = req.body
+      const changes = body.changes
+
+      if (changes) {
+
+        try {
+          await UserDB.updateOne({ email: req.user.email}, { username: changes.username.value })
+          await UserDB.updateOne({ email: req.user.email}, { profileBio: changes.profileBio.value })
+          res.json({ succes: "Profile updated succesfully"})
+        }
+        catch {
+          res.json({ error: "An error occured"})
+        }
+      }
+
+      const user = await UserDB.findById(req.session.user_id)
+      req.user = user;
+    });
     // GOOGLE AUTH
 
     // VIDEO CHAT START
@@ -176,161 +196,11 @@ mongoose
       getRemoteUserSession(io, socket, MyCalls)
       validateRoom(io, socket, MyCalls)
       sendReqToJoin(io, socket, MyCalls)
-      disconnect(io, socket, MyCalls)
+      disconnect(io, socket, MyCalls, UserDB)
     }
     
     io.on('connection', onConnection)
 
-    /* 
-    io.on('connection', (socket) => {
-
-      // VIDEO CHAT ---------------------------------------------------------------------------------------------------
-      socket.on("offerDescription", data => {
-
-        const newCall = new Call(socket.id, data.lesson)
-        newCall.AddUser({ id: socket.id, session: data.userData })
-        newCall.offerDesc = data.offer
-        MyCalls.calls.push(newCall)
-  
-        socket.on("changeStatus", (status) => {
-          newCall.teacherStatus = status
-        })
-        
-        socket.on("answerReq", (req, state) => {
-          const foundReq = newCall.waitingStudents.find(std => std.id == req.id);
-
-          if (!foundReq) return
-
-          if (state) {
-            newCall.waitingStudents = []
-          }
-          else {
-            newCall.waitingStudents = newCall.waitingStudents.filter(function(student) {
-              return student.id != req.id
-            })
-
-          }
-
-          io.to(foundReq.id).emit("reqAnswered", state);
-          io.to(newCall.id).emit("joinRequests", newCall.waitingStudents) // call.id = to teacher  
-        });
-      })
-
-      
-      socket.on("offerCandidates", data => {
-
-        const call = MyCalls.GetCallFromUserId(socket.id)
-        call.offerCandidates.push(data.candidates)
-
-        if (call.users.length == 2) {
-          let user = call.users.filter(func).filter(function(u) {
-            return u.id != socket.id
-          });
-
-          io.to(user[0].id).emit("offerCandidates", data.candidates)
-        }
-      })
-
-      
-      socket.on("validateRoom", (roomId) => {
-        const call = MyCalls.calls.find(call => call.id == roomId)
-
-        if (call) {
-          socket.emit("validateRoom", call.users.length < 2 ? true : "full", roomId)
-        }
-        else {
-          socket.emit("validateRoom", false)
-        }
-      })
-
-      
-      socket.on("sendReqToJoin", (data) => { // callId, session
-        const call = MyCalls.calls.find(call => call.id == data.callId)
-
-        if (!call) {
-          socket.emit("roomNotFound");
-          return
-        }
-
-        call.waitingStudents.push({ id: socket.id, userData: data.session })
-
-        io.to(call.id).emit("joinRequests", call.waitingStudents) // call.id = to teacher
-      })
-
-      
-      socket.on("getOfferDesc", (callId) => {
-
-        const call = MyCalls.calls.find(call => call.id == callId)
-        if (!call) {
-          socket.emit("roomNotFound");
-          return
-        }
-        const offerDesc = call.offerDesc
-        socket.emit("getOfferDesc", offerDesc, call.lesson)
-      })
-
-      
-      socket.on("getRemoteUserSession", () => {
-
-        const call = MyCalls.GetCallFromUserId(socket.id)
-        let user = call.users.filter(function(u) {
-          return u.id != socket.id
-        });
-
-        socket.emit("getRemoteUserSession", (user[0].session))
-      })
-
-      
-      socket.on("answerDescription", (data) => {
-        const call = MyCalls.calls.find(call => call.id == data.callId)
-        call.answerDesc = data.answerDesc
-        call.AddUser({ id: socket.id, session: data.userData })
-
-        let user = call.users.filter(function(u) {
-          return u.id != socket.id
-        });
-
-        io.to(user[0].id).emit('remoteDescription', call.answerDesc)
-        socket.emit("getOfferCandidates", call.offerCandidates)
-
-        call.connectedDate = Date.now()
-        call.StartTimeCounter(io)
-      });
-
-      
-      socket.on("answerCandidates", data => {
-
-        const call = MyCalls.GetCallFromUserId(socket.id)
-        call.answerCandidates.push(data.candidates)
-
-        let user = call.users.filter(function(u) {
-          return u.id != socket.id
-        });
-
-        io.to(user[0].id).emit("answerCandidates", data.candidates)
-      })
-
-
-      socket.on("disconnect", () => {
-        const call = MyCalls.GetCallFromUserId(socket.id)
-        if (call) {
-          let user = call.users.filter(function(u) {
-            return u.id != socket.id
-          });
-
-          MyCalls.RemoveCall(call.id)
-
-          if (!user[0]) return
-
-          io.to(user[0].id).emit("remoteDisconnected")
-
-        }
-      });
-      
-      // VIDEO CHAT ---------------------------------------------------------------------------------------------------
-    });
-    */
-    
     const PORT = process.env.PORT || 3001;
     server.listen(PORT, () => {
       console.log(`Listening port: ${PORT}`);
